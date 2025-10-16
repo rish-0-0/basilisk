@@ -93,98 +93,352 @@ router = CRUDRouter(..., get_db=get_db)
 - [x] GraphQL example
 - [x] Combined REST + GraphQL example
 
-### 🚧 Phase 3: Advanced Query Parsing (IN PROGRESS)
-**Priority**: HIGH
+### ✅ Phase 3: Advanced Query Parsing (COMPLETED)
 
-Implement advanced query parsing for REST APIs with GitHub-style syntax:
+Implemented advanced query parsing for REST APIs with industry-standard syntax.
 
-#### Required Features:
+#### Implemented Features:
 1. **Filtering**:
-   ```
-   ?assignee=A,B,C&author=X,Y,Z
-   ?status=open&priority=high,critical
-   ```
+   - Multiple values per field: `?status=active,pending`
+   - Multiple filters: `?status=active&role=admin,user`
+   - OR logic within fields, AND logic across fields
 
 2. **Field Selection**:
-   ```
-   ?select=col1,col2,col3
-   ?select=id,name,email  # Only return specified fields
-   ```
+   - Simple fields: `?select=id,name,email`
+   - With aliases: `?select=name;product_name` or `?select=name as product_name`
 
 3. **Aggregation Functions**:
-   ```
-   ?select=col1,sum(col2),count(col3)&groupBy=col1
-   ?select=sum(col1);sum_col_1,col2,count(col3);count&groupBy=col1,col3
-   ```
+   - Count, sum, avg, min, max supported
+   - With grouping: `?select=category,count(id) as total&groupBy=category`
+   - With aliases: `?select=sum(amount);total_amount&groupBy=status`
 
 4. **Ordering**:
-   ```
-   ?orderBy=name:asc,created_at:desc
-   ?orderBy=[(col1,Asc),(col2,Desc)]
-   ```
+   - Single field: `?orderBy=name:asc`
+   - Multiple fields: `?orderBy=name:asc,created_at:desc`
+   - Default direction (asc): `?orderBy=name`
 
 5. **Grouping**:
-   ```
-   ?groupBy=col1,col2,col3
-   ```
+   - Single field: `?groupBy=status`
+   - Multiple fields: `?groupBy=status,role`
+
+#### Security Features:
+- ✅ SQL injection prevention through whitelist validation
+- ✅ Column name validation against model attributes
+- ✅ Parameterized queries via SQLAlchemy
+- ✅ Aggregation function name validation
+- ✅ Alphanumeric validation for aliases
+
+### ✅ Phase 4: Enhanced GraphQL (COMPLETED)
+
+Enhanced GraphQL API with advanced querying capabilities to match REST feature parity.
+
+#### Implemented Features:
+1. **Advanced Filtering in GraphQL**:
+   - ✅ `where` clauses with field-level filters
+   - ✅ Comparison operators: `eq`, `in`, `not`, `lt`, `lte`, `gt`, `gte`
+   - ✅ Logical operators: `AND`, `OR`, `NOT`
+   - ✅ Nested filter conditions
+   - ✅ Works with both list and connection queries
+
+2. **Connection-Based Pagination** (Relay-style):
+   - ✅ Cursor-based pagination using base64-encoded IDs
+   - ✅ Support for `first`, `after`, `last`, `before` arguments
+   - ✅ Returns `edges` with `node` and `cursor`
+   - ✅ `pageInfo` with `hasNextPage`, `hasPreviousPage`, `startCursor`, `endCursor`
+   - ✅ `totalCount` for total results
+   - ✅ More scalable than offset-based pagination
+   - ✅ Works with ordering and filtering
+
+3. **Enhanced Ordering**:
+   - ✅ Multi-field ordering support
+   - ✅ Direction specification (asc/desc)
+   - ✅ Works with both list and connection queries
+
+#### What's Not Implemented (Future):
+- ❌ Nested relationships in queries (Phase 6)
+- ❌ DataLoader integration for N+1 prevention (Phase 6)
+- ❌ Field-level permissions in GraphQL
+- ❌ Subscription support
+
+#### Examples:
+- See `examples/advanced_graphql_example.py` for comprehensive examples
+- Demonstrates all Phase 4 features with real use cases
+
+### ✅ Phase 5: Role-Based Access Control (COMPLETED)
+
+Implemented RBAC system for controlling access to CRUD operations based on user roles.
+
+**Note**: This phase focuses ONLY on authorization (RBAC). Authentication (JWT, OAuth2, etc.) is handled by the user's application.
+
+#### Implemented Features:
+1. **Role Definition System**:
+   - ✅ `PermissionConfig` class for defining role-based permissions
+   - ✅ Dictionary mapping roles to allowed operations (create, read, update, delete)
+   - ✅ Flexible configuration per resource
+   - ✅ Support for anonymous access to specific operations
+
+2. **Permission Checking**:
+   - ✅ `PermissionChecker` class for validating permissions
+   - ✅ Automatic integration with FastAPI dependencies
+   - ✅ User context extraction from requests
+   - ✅ Clear permission denied errors (HTTP 403)
+
+3. **CRUDRouter Integration**:
+   - ✅ Optional `permissions` parameter in CRUDRouter
+   - ✅ Optional `get_current_user` dependency injection
+   - ✅ Automatic protection of all CRUD endpoints
+   - ✅ Operation-level permissions (list, get, create, update, delete)
+
+4. **GraphQL Integration**:
+   - ✅ Permission checks in all GraphQL resolvers
+   - ✅ Query permissions (read operations)
+   - ✅ Mutation permissions (create, update, delete operations)
+   - ✅ Consistent authorization across REST and GraphQL
+   - ✅ User context passed through GraphQL context
+
+5. **Resource-Level Permissions**:
+   - ✅ `ResourcePermissionChecker` for custom permission logic
+   - ✅ Support for permission callback functions
+   - ✅ Custom checks in `PermissionConfig`
+   - ✅ Example: "users can only edit their own posts"
+
+6. **User Context**:
+   - ✅ `UserContext` base model with id and roles
+   - ✅ Extensible for custom user models
+   - ✅ Integration with any authentication system
+
+#### Examples:
+- See `examples/rbac_example.py` for comprehensive RBAC implementation
+- Demonstrates REST and GraphQL with multiple roles
+- Shows custom permission functions for resource-level access
+
+#### What's Not Implemented (Future):
+- ❌ Field-level permissions (hiding specific fields based on role)
+- ❌ Built-in JWT/OAuth2 authentication (user provides this)
+- ❌ Permission caching/optimization
+- ❌ Audit logging for permission checks
+
+### ✅ Phase 6: Multi-Model Associations (COMPLETED)
+**Priority**: MEDIUM
+
+Implemented support for SQLAlchemy relationships (associations) in both REST and GraphQL APIs as an **OPT-IN** feature.
+
+#### Implemented Features:
+1. **One-to-Many Relationships**:
+   - Parent can have multiple children
+   - Automatic nested queries
+   - Example: User has many Posts
+     ```python
+     class User(Base):
+         __tablename__ = "users"
+         id = Column(Integer, primary_key=True)
+         posts = relationship("Post", back_populates="author")
+
+     class Post(Base):
+         __tablename__ = "posts"
+         id = Column(Integer, primary_key=True)
+         author_id = Column(Integer, ForeignKey("users.id"))
+         author = relationship("User", back_populates="posts")
+     ```
+
+2. **Many-to-One Relationships**:
+   - Child belongs to parent
+   - Query child with parent data
+   - Example: Post belongs to User
+   - Inverse of one-to-many
+
+3. **One-to-One Relationships**:
+   - Single record relates to single record
+   - Example: User has one Profile
+     ```python
+     class User(Base):
+         __tablename__ = "users"
+         id = Column(Integer, primary_key=True)
+         profile = relationship("Profile", back_populates="user", uselist=False)
+
+     class Profile(Base):
+         __tablename__ = "profiles"
+         id = Column(Integer, primary_key=True)
+         user_id = Column(Integer, ForeignKey("users.id"), unique=True)
+         user = relationship("User", back_populates="profile")
+     ```
+
+4. **Many-to-Many Relationships**:
+   - Records relate through association table
+   - Example: Users have many Roles, Roles have many Users
+     ```python
+     user_roles = Table('user_roles', Base.metadata,
+         Column('user_id', Integer, ForeignKey('users.id')),
+         Column('role_id', Integer, ForeignKey('roles.id'))
+     )
+
+     class User(Base):
+         __tablename__ = "users"
+         id = Column(Integer, primary_key=True)
+         roles = relationship("Role", secondary=user_roles, back_populates="users")
+
+     class Role(Base):
+         __tablename__ = "roles"
+         id = Column(Integer, primary_key=True)
+         users = relationship("User", secondary=user_roles, back_populates="roles")
+     ```
+
+#### REST API Support:
+1. **Nested Resource Routes**:
+   - `/users/{user_id}/posts` - List posts for a user
+   - `/users/{user_id}/posts/{post_id}` - Get specific post
+   - Support CRUD on nested resources
+
+2. **Include Related Data**:
+   - Query parameter to include relationships: `?include=posts,profile`
+   - Eager loading to prevent N+1 queries
+   - Control depth of nesting: `?include=posts.comments`
+
+3. **Filtering by Relationships**:
+   - Filter by related model fields: `?author.name=John`
+   - Support joins in query parser
+
+#### GraphQL API Support:
+1. **Nested Queries**:
+   - Automatic resolvers for relationships
+   - Query related data in single request
+     ```graphql
+     query {
+       getUser(id: 1) {
+         id
+         name
+         posts {
+           id
+           title
+         }
+         profile {
+           bio
+         }
+       }
+     }
+     ```
+
+2. **Relationship Mutations**:
+   - Create related records together
+   - Associate/dissociate relationships
+   - Update through relationships
+
+3. **DataLoader Integration**:
+   - Batch relationship queries
+   - Prevent N+1 query problem
+   - Cache related data per request
 
 #### Implementation Notes:
-- **SECURITY**: Prevent SQL injection - validate all inputs
-- Use parameterized queries via SQLAlchemy
-- Consider using existing packages if they meet standards
-- Flexible syntax - doesn't have to match examples exactly
-- Industry standard syntax is preferred
+- ✅ **OPT-IN Design**: Associations are completely optional via `enable_associations=True`
+- ✅ **Auto-detection**: Automatically detects all SQLAlchemy relationship types
+- ✅ **Eager Loading**: Implements `joinedload` to prevent N+1 query problems
+- ✅ **Security**: Validates relationship names and limits nesting depth (max 3 levels)
+- ✅ **Circular Reference Protection**: Max depth parameter prevents infinite loops
+- ✅ **REST API**: `?include=posts,profile` or `?include=posts.tags,profile`
+- ✅ **GraphQL API**: Automatic nested resolvers when associations enabled
+- ✅ **Comprehensive Tests**: 18 tests covering all functionality
+- ✅ **Example**: `examples/associations_example.py` demonstrates all 4 relationship types
 
-#### Suggested Approach:
-- Create `query_parser.py` module
-- Parse query strings into SQLAlchemy query objects
-- Support both simple and complex queries
-- Add comprehensive tests for injection prevention
+#### Usage:
+```python
+# REST API with associations
+router = CRUDRouter(
+    model=User,
+    create_schema=UserCreate,
+    response_schema=UserResponse,
+    get_db=get_db,
+    enable_associations=True,  # OPT-IN
+)
 
-### 📋 Phase 4: Enhanced GraphQL (FUTURE)
-- [ ] Advanced filtering in GraphQL (where clauses)
-- [ ] Nested relationships
-- [ ] Connection-based pagination (relay-style)
-- [ ] DataLoader integration for N+1 query prevention
+# Query with includes
+# GET /users/?include=posts,profile
+# GET /posts/?include=author,tags
+# GET /users/1?include=posts.tags,profile
 
-### 🔐 Phase 5: Authentication & Authorization (FUTURE)
-- [ ] Authentication dependency helpers
-- [ ] Role-based access control (RBAC)
-- [ ] JWT token support
-- [ ] OAuth2 integration
-- [ ] Permission decorators for routes
+# GraphQL with associations
+graphql_router = GraphQLCRUDRouter(
+    model=User,
+    create_schema=UserCreate,
+    response_schema=UserResponse,
+    get_db=get_db,
+    enable_associations=True,  # OPT-IN
+)
+```
 
-### 🔄 Phase 6: Advanced Features (FUTURE)
-- [ ] Async database support
-- [ ] Multiple model relationships
-- [ ] File upload handling
-- [ ] Webhooks
-- [ ] Rate limiting
-- [ ] Caching strategies
+#### Files Created:
+- `basilisk/associations.py` - Core association utilities module (optional)
+- `examples/associations_example.py` - Comprehensive example with all relationship types
+- `tests/test_associations.py` - Full test suite for associations
 
 ---
 
 ## 🎯 Current Implementation Status
 
 ### What's Working:
-1. ✅ REST API with basic list endpoint
-2. ✅ GraphQL API with full CRUD
-3. ✅ Automatic schema generation (both REST and GraphQL)
-4. ✅ Documentation endpoint for REST
-5. ✅ Working examples for REST, GraphQL, and combined
-6. ✅ Pydantic model integration
-7. ✅ SQLAlchemy 2.0 support
-8. ✅ FastAPI integration
-9. ✅ Interactive docs (Swagger for REST, Playground for GraphQL)
+1. ✅ **REST API with full CRUD**:
+   - GET (list with pagination)
+   - GET by ID (single record)
+   - POST (create)
+   - PUT (update)
+   - DELETE
+   - Optional: Include parameter for eager loading associations
+2. ✅ **GraphQL API with full CRUD**:
+   - Queries: list, get single item
+   - Mutations: create, update, delete
+   - Optional: Nested relationship resolvers
+3. ✅ **Advanced Query Parsing**:
+   - Filtering with multiple values per field
+   - Field selection with aliases
+   - Aggregation functions (count, sum, avg, min, max)
+   - Ordering (ASC/DESC)
+   - Grouping
+   - SQL injection prevention
+4. ✅ **GraphQL Enhancements**:
+   - Relay-style connection pagination with cursors
+   - Advanced WHERE filtering (eq, in, not, lt, lte, gt, gte)
+   - Logical operators (AND, OR, NOT)
+   - Multi-field ordering
+5. ✅ **Role-Based Access Control (RBAC)** - Optional:
+   - Permission system with role configuration
+   - Operation-level permissions
+   - Resource-level custom checks
+   - Integration with both REST and GraphQL
+   - User context management
+6. ✅ **Multi-Model Associations** - Optional:
+   - One-to-Many relationships
+   - Many-to-One relationships
+   - One-to-One relationships
+   - Many-to-Many relationships
+   - Eager loading with ?include parameter
+   - Nested relationship support
+   - Automatic GraphQL nested resolvers
+   - Security: validation and depth limiting
+7. ✅ **Automatic Schema Generation**:
+   - REST schemas from Pydantic models
+   - GraphQL schemas from Pydantic models with WHERE inputs
+   - Relay connection types
+8. ✅ **Documentation**:
+   - REST documentation endpoint
+   - Interactive Swagger UI
+   - GraphQL Playground
+9. ✅ **Core Features**:
+   - Pydantic model integration
+   - SQLAlchemy 2.0 support
+   - FastAPI integration
+   - Proper error handling
+   - Security features (SQL injection prevention, input validation)
+   - Optional dependencies (Ariadne for GraphQL)
+   - Optional features (RBAC, Associations)
 
 ### What's NOT Implemented Yet:
-1. ❌ REST: Create, Update, Delete operations
-2. ❌ Advanced query parsing (filtering, groupBy, orderBy, etc.)
-3. ❌ Field selection in REST
-4. ❌ Aggregation functions
-5. ❌ Authentication/Authorization
-6. ❌ Relationship handling
-7. ❌ Async database operations
+1. ❌ **Future Enhancements**:
+   - Async database operations
+   - File upload handling
+   - Webhooks
+   - Rate limiting
+   - Caching strategies
+   - DataLoader integration for GraphQL (advanced N+1 prevention)
+   - Field-level permissions in GraphQL
 
 ---
 
@@ -383,17 +637,61 @@ tests/
 
 ## 🎯 Next Steps (Priority Order)
 
-1. **Implement full REST CRUD operations** (create, get, update, delete)
-2. **Add query parser for advanced filtering**
-3. **Add comprehensive tests for query parser**
-4. **Add field selection support**
-5. **Add aggregation functions**
-6. **Security audit for SQL injection prevention**
-7. **Add authentication framework**
-8. **Add relationship support**
+### Phase 4: Enhanced GraphQL (High Priority)
+1. **Implement advanced filtering in GraphQL**
+   - Where clauses with comparison operators
+   - AND/OR logic
+   - Field-level filters
+2. **Add nested relationships to GraphQL**
+   - Detect SQLAlchemy relationships
+   - Auto-generate resolvers
+   - DataLoader integration for N+1 prevention
+3. **Implement connection-based pagination**
+   - Relay-style cursors
+   - PageInfo with hasNext/hasPrevious
+   - Edges and nodes structure
+4. **Add comprehensive tests for GraphQL enhancements**
+
+### Phase 5: RBAC (Medium Priority)
+1. **Design RBAC system architecture**
+   - Role definition system
+   - Permission decorators
+   - Integration with FastAPI dependencies
+2. **Implement permission decorators**
+   - Route-level permissions
+   - Resource-level permissions
+   - Custom permission functions
+3. **Add RBAC to both REST and GraphQL**
+   - Consistent authorization across APIs
+   - Clear error messages
+4. **Document integration with auth libraries**
+   - Examples with common auth packages
+   - Best practices guide
+
+### Phase 6: Multi-Model Relationships (Medium Priority)
+1. **Implement one-to-many relationships**
+   - Auto-detect from SQLAlchemy
+   - REST nested routes
+   - GraphQL nested queries
+2. **Implement many-to-one relationships**
+   - Inverse of one-to-many
+   - Include related data in queries
+3. **Implement one-to-one relationships**
+   - Profile pattern support
+   - Unique constraints
+4. **Implement many-to-many relationships**
+   - Association table support
+   - Bi-directional queries
+5. **Add relationship filtering**
+   - Filter by related model fields
+   - Join support in query parser
+6. **Comprehensive examples and tests**
+   - Multi-model examples
+   - Performance testing
+   - N+1 query prevention
 
 ---
 
-**Last Updated**: 2025-10-11
-**Current Version**: 0.1.0
-**Status**: Active Development
+**Last Updated**: 2025-10-16
+**Current Version**: 0.3.0
+**Status**: Active Development - Phases 1-6 Complete (REST, GraphQL, Query Parsing, RBAC, Associations)

@@ -3,7 +3,20 @@
 from .router import CRUDRouter
 from .query_parser import QueryParser
 
-# GraphQL support (optional - requires ariadne)
+# Permissions support (RBAC) - optional
+try:
+    from .permissions import (
+        PermissionChecker,
+        PermissionConfig,
+        ResourcePermissionChecker,
+        UserContext,
+        requires_role,
+    )
+    PERMISSIONS_AVAILABLE = True
+except ImportError:
+    PERMISSIONS_AVAILABLE = False
+
+# GraphQL support - optional (requires ariadne)
 try:
     from .graphql_router import GraphQLCRUDRouter
     from .graphql_schema import (
@@ -11,17 +24,56 @@ try:
         generate_graphql_schema,
         generate_graphql_type_from_pydantic,
     )
+    GRAPHQL_AVAILABLE = True
+except ImportError:
+    GRAPHQL_AVAILABLE = False
 
-    __all__ = [
-        "CRUDRouter",
-        "QueryParser",
+# Associations (relationships) support - optional
+try:
+    from .associations import (
+        AssociationInfo,
+        AssociationType,
+        apply_includes_to_query,
+        get_association_target,
+        get_model_associations,
+        has_association,
+        parse_include_param,
+        validate_include_param,
+    )
+    ASSOCIATIONS_AVAILABLE = True
+except ImportError:
+    ASSOCIATIONS_AVAILABLE = False
+
+# Build __all__ dynamically based on available features
+__all__ = ["CRUDRouter", "QueryParser"]
+
+if PERMISSIONS_AVAILABLE:
+    __all__.extend([
+        "PermissionChecker",
+        "PermissionConfig",
+        "ResourcePermissionChecker",
+        "UserContext",
+        "requires_role",
+    ])
+
+if GRAPHQL_AVAILABLE:
+    __all__.extend([
         "GraphQLCRUDRouter",
         "generate_graphql_schema",
         "generate_graphql_type_from_pydantic",
         "generate_graphql_input_from_pydantic",
-    ]
-except ImportError:
-    # Ariadne not installed - GraphQL support not available
-    __all__ = ["CRUDRouter", "QueryParser"]
+    ])
 
-__version__ = "0.1.0"
+if ASSOCIATIONS_AVAILABLE:
+    __all__.extend([
+        "AssociationInfo",
+        "AssociationType",
+        "apply_includes_to_query",
+        "get_association_target",
+        "get_model_associations",
+        "has_association",
+        "parse_include_param",
+        "validate_include_param",
+    ])
+
+__version__ = "0.3.0"

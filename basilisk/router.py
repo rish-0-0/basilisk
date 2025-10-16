@@ -1,6 +1,6 @@
 """FastAPI router generator for CRUD operations."""
 
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
@@ -9,6 +9,28 @@ from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from .query_parser import QueryParser
+
+try:
+    from .permissions import PermissionChecker, PermissionConfig, UserContext
+    PERMISSIONS_AVAILABLE = True
+except ImportError:
+    PERMISSIONS_AVAILABLE = False
+    PermissionChecker = None  # type: ignore
+    PermissionConfig = None  # type: ignore
+    UserContext = None  # type: ignore
+
+try:
+    from .associations import (
+        apply_includes_to_query,
+        parse_include_param,
+        validate_include_param,
+    )
+    ASSOCIATIONS_AVAILABLE = True
+except ImportError:
+    ASSOCIATIONS_AVAILABLE = False
+    apply_includes_to_query = None  # type: ignore
+    parse_include_param = None  # type: ignore
+    validate_include_param = None  # type: ignore
 
 
 class CRUDRouter:
@@ -39,13 +61,41 @@ class CRUDRouter:
         prefix: str = "",
         tags: list[str] | None = None,
         update_schema: type[BaseModel] | None = None,
+        permissions: Optional[Any] = None,  # PermissionConfig type
+        get_current_user: Optional[Callable] = None,
+        enable_associations: bool = False,
     ):
-        """Initialize the CRUD router."""
+        """
+        Initialize the CRUD router.
+
+        Args:
+            model: SQLAlchemy model class
+            create_schema: Pydantic schema for creating records
+            response_schema: Pydantic schema for responses
+            get_db: Database session dependency
+            prefix: URL prefix for routes
+            tags: OpenAPI tags
+            update_schema: Optional Pydantic schema for updates
+            permissions: Optional PermissionConfig for RBAC
+            get_current_user: Optional dependency for getting current user
+            enable_associations: Enable relationship/association support (opt-in)
+        """
         self.model = model
         self.create_schema = create_schema
         self.update_schema = update_schema or create_schema  # Use create_schema if update_schema not provided
         self.response_schema = response_schema
         self.get_db = get_db
+
+        # Setup permissions if provided
+        self.permission_checker = None
+        if permissions and PERMISSIONS_AVAILABLE:
+            self.permission_checker = PermissionChecker(
+                config=permissions,
+                get_current_user=get_current_user,
+            )
+
+        # Setup associations if enabled
+        self.enable_associations = enable_associations and ASSOCIATIONS_AVAILABLE
 
         # Create the FastAPI router
         self.router = APIRouter(prefix=prefix, tags=tags or [model.__name__])  # type: ignore[arg-type]
@@ -61,13 +111,19 @@ class CRUDRouter:
     def _add_list_route(self, response_schema: type[BaseModel], model: type[Any], get_db: Callable) -> None:
         """Add GET / route for listing records with advanced query support."""
 
-        @self.router.get("/", response_model=list[response_schema])  # type: ignore[valid-type]
+        # Build dependencies list
+        dependencies = []
+        if self.permission_checker:
+            dependencies.append(Depends(self.permission_checker.require("read")))
+
+        @self.router.get("/", response_model=list[response_schema], dependencies=dependencies)  # type: ignore[valid-type]
         def list_items(
             request: Request,
             skip: int = Query(0, ge=0, description="Number of records to skip"),
             limit: int = Query(
                 100, ge=1, le=1000, description="Maximum number of records to return"
             ),
+            include: str = Query("", description="Comma-separated associations to include (e.g., 'posts,profile')"),
             db: Session = Depends(get_db),
         ):
             """
@@ -79,14 +135,32 @@ class CRUDRouter:
             - Ordering: ?orderBy=field1:asc,field2:desc
             - Grouping: ?groupBy=field1,field2
             - Aggregation: ?select=count(id) as total&groupBy=status
+            - Include associations (if enabled): ?include=posts,profile
 
             Examples:
             - ?status=active&role=admin,user
             - ?select=id,name,email&orderBy=name:asc
             - ?select=category,count(id) as total&groupBy=category
+            - ?include=posts,profile (requires enable_associations=True)
             """
             # Create base query
             base_query = db.query(model)
+
+            # Apply associations if enabled and requested
+            if self.enable_associations and include:
+                try:
+                    include_dict = parse_include_param(include)  # type: ignore
+                    valid, error = validate_include_param(model, include_dict)  # type: ignore
+                    if not valid:
+                        raise HTTPException(status_code=400, detail=error)
+                    base_query = apply_includes_to_query(base_query, model, include_dict)  # type: ignore
+                except Exception as e:
+                    if isinstance(e, HTTPException):
+                        raise
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Invalid include parameter: {str(e)}"
+                    )
 
             # Parse and apply advanced query parameters (filtering, grouping, selection, ordering)
             parser = QueryParser(model, dict(request.query_params))
@@ -102,9 +176,15 @@ class CRUDRouter:
     def _add_get_route(self, response_schema: type[BaseModel], model: type[Any], get_db: Callable) -> None:
         """Add GET /{id} route for retrieving a single record."""
 
-        @self.router.get("/{item_id}", response_model=response_schema)
+        # Build dependencies list
+        dependencies = []
+        if self.permission_checker:
+            dependencies.append(Depends(self.permission_checker.require("read")))
+
+        @self.router.get("/{item_id}", response_model=response_schema, dependencies=dependencies)
         def get_item(
             item_id: int,
+            include: str = Query("", description="Comma-separated associations to include (e.g., 'posts,profile')"),
             db: Session = Depends(get_db),
         ):
             """
@@ -112,6 +192,7 @@ class CRUDRouter:
 
             Args:
                 item_id: The ID of the record to retrieve
+                include: Optional associations to include (requires enable_associations=True)
                 db: Database session (injected)
 
             Returns:
@@ -120,7 +201,25 @@ class CRUDRouter:
             Raises:
                 HTTPException: 404 if record not found
             """
-            item = db.query(model).filter(model.id == item_id).first()
+            query = db.query(model)
+
+            # Apply associations if enabled and requested
+            if self.enable_associations and include:
+                try:
+                    include_dict = parse_include_param(include)  # type: ignore
+                    valid, error = validate_include_param(model, include_dict)  # type: ignore
+                    if not valid:
+                        raise HTTPException(status_code=400, detail=error)
+                    query = apply_includes_to_query(query, model, include_dict)  # type: ignore
+                except Exception as e:
+                    if isinstance(e, HTTPException):
+                        raise
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Invalid include parameter: {str(e)}"
+                    )
+
+            item = query.filter(model.id == item_id).first()
 
             if not item:
                 raise HTTPException(
@@ -133,10 +232,16 @@ class CRUDRouter:
     def _add_create_route(self, create_schema: type[BaseModel], response_schema: type[BaseModel], model: type[Any], get_db: Callable) -> None:
         """Add POST / route for creating a new record."""
 
+        # Build dependencies list
+        dependencies = []
+        if self.permission_checker:
+            dependencies.append(Depends(self.permission_checker.require("create")))
+
         @self.router.post(
             "/",
             response_model=response_schema,
             status_code=201,
+            dependencies=dependencies,
         )
         def create_item(
             item: create_schema,  # type: ignore[valid-type]
@@ -186,9 +291,15 @@ class CRUDRouter:
     def _add_update_route(self, update_schema: type[BaseModel], response_schema: type[BaseModel], model: type[Any], get_db: Callable) -> None:
         """Add PUT /{id} route for updating an existing record."""
 
+        # Build dependencies list
+        dependencies = []
+        if self.permission_checker:
+            dependencies.append(Depends(self.permission_checker.require("update")))
+
         @self.router.put(
             "/{item_id}",
             response_model=response_schema,
+            dependencies=dependencies,
         )
         def update_item(
             item_id: int,
@@ -248,9 +359,15 @@ class CRUDRouter:
     def _add_delete_route(self, model: type[Any], get_db: Callable) -> None:
         """Add DELETE /{id} route for deleting a record."""
 
+        # Build dependencies list
+        dependencies = []
+        if self.permission_checker:
+            dependencies.append(Depends(self.permission_checker.require("delete")))
+
         @self.router.delete(
             "/{item_id}",
             status_code=204,
+            dependencies=dependencies,
         )
         def delete_item(
             item_id: int,

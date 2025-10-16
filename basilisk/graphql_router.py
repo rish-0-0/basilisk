@@ -5,14 +5,24 @@ This module provides a GraphQL router that works alongside or instead of
 the REST router, giving developers flexibility in API design.
 """
 
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 from ariadne import MutationType, QueryType, make_executable_schema
 from ariadne.asgi import GraphQL
+from fastapi import HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from .graphql_schema import generate_graphql_schema
+
+try:
+    from .permissions import PermissionChecker, PermissionConfig, UserContext
+    PERMISSIONS_AVAILABLE = True
+except ImportError:
+    PERMISSIONS_AVAILABLE = False
+    PermissionChecker = None  # type: ignore
+    PermissionConfig = None  # type: ignore
+    UserContext = None  # type: ignore
 
 
 class GraphQLCRUDRouter:
@@ -44,6 +54,9 @@ class GraphQLCRUDRouter:
         get_db: Callable,
         path: str = "/graphql",
         resource_name: str | None = None,
+        permissions: Optional[Any] = None,  # PermissionConfig type
+        get_current_user: Optional[Callable] = None,
+        enable_associations: bool = False,
     ):
         """
         Initialize the GraphQL CRUD router.
@@ -56,6 +69,9 @@ class GraphQLCRUDRouter:
             get_db: Database session dependency
             path: GraphQL endpoint path
             resource_name: Name of the resource (defaults to model.__name__)
+            permissions: Optional PermissionConfig for RBAC
+            get_current_user: Optional dependency for getting current user
+            enable_associations: Enable relationship/association support (opt-in)
         """
         self.model = model
         self.create_schema = create_schema
@@ -64,6 +80,24 @@ class GraphQLCRUDRouter:
         self.get_db = get_db
         self.path = path
         self.resource_name = resource_name or model.__name__
+        self.get_current_user = get_current_user
+
+        # Setup permissions if provided
+        self.permission_checker = None
+        if permissions and PERMISSIONS_AVAILABLE:
+            self.permission_checker = PermissionChecker(
+                config=permissions,
+                get_current_user=get_current_user,
+            )
+
+        # Setup associations if enabled (check if module is available)
+        try:
+            from .associations import get_model_associations
+            self.enable_associations = enable_associations
+            self._associations_module_available = True
+        except ImportError:
+            self.enable_associations = False
+            self._associations_module_available = False
 
         # Generate schema
         self.schema_str = generate_graphql_schema(
@@ -92,9 +126,40 @@ class GraphQLCRUDRouter:
         )
 
     def _get_context(self, request: Any) -> dict[str, Any]:
-        """Get context for GraphQL resolvers (includes DB session)."""
+        """
+        Get context for GraphQL resolvers (includes DB session and user).
+
+        Returns:
+            Context dictionary with db, request, and optionally user
+        """
         db = next(self.get_db())
-        return {"db": db, "request": request}
+        context = {"db": db, "request": request, "user": None}
+
+        # Get current user if authentication is configured
+        if self.get_current_user:
+            try:
+                user = self.get_current_user(request)
+                context["user"] = user
+            except Exception:
+                # If authentication fails, leave user as None
+                pass
+
+        return context
+
+    def _check_permission(self, operation: str, user: Any) -> None:
+        """
+        Check if user has permission for an operation.
+
+        Args:
+            operation: Operation name (read, create, update, delete)
+            user: User context from GraphQL context
+
+        Raises:
+            Exception: If permission is denied
+        """
+        if self.permission_checker:
+            if not self.permission_checker.config.is_allowed(operation, user):
+                raise Exception(f"Permission denied: {operation} operation requires appropriate role")
 
     def _setup_query_resolvers(self) -> None:
         """Setup query resolvers for list and get operations."""
@@ -105,6 +170,10 @@ class GraphQLCRUDRouter:
         @self.query.field(resource_lower)
         def resolve_get(obj: Any, info: Any, id: int) -> dict[str, Any] | None:
             """Get a single record by ID."""
+            # Check permission
+            user = info.context.get("user")
+            self._check_permission("read", user)
+
             db: Session = info.context["db"]
             item = db.query(self.model).filter(self.model.id == id).first()
 
@@ -133,6 +202,10 @@ class GraphQLCRUDRouter:
                 orderBy: List of columns to order by (e.g., ["name", "id:desc"])
                 where: Filter conditions (supports comparison operators and logical operators)
             """
+            # Check permission
+            user = info.context.get("user")
+            self._check_permission("read", user)
+
             db: Session = info.context["db"]
             query = db.query(self.model)
 
@@ -161,6 +234,111 @@ class GraphQLCRUDRouter:
             # Convert to dicts
             return [self._model_to_dict(item) for item in items]
 
+        # Resolver for Relay-style connection pagination
+        @self.query.field(f"{resource_plural}Connection")
+        def resolve_connection(
+            obj: Any,
+            info: Any,
+            first: int | None = None,
+            after: str | None = None,
+            last: int | None = None,
+            before: str | None = None,
+            orderBy: list[str] | None = None,
+            where: dict[str, Any] | None = None,
+        ) -> dict[str, Any]:
+            """
+            List records with Relay-style cursor pagination.
+
+            Args:
+                first: Number of items to return from the start
+                after: Cursor to start after
+                last: Number of items to return from the end
+                before: Cursor to end before
+                orderBy: List of columns to order by
+                where: Filter conditions
+            """
+            # Check permission
+            user = info.context.get("user")
+            self._check_permission("read", user)
+
+            db: Session = info.context["db"]
+            query = db.query(self.model)
+
+            # Apply WHERE filtering
+            if where:
+                query = self._apply_where_filters(query, where)
+
+            # Apply ordering
+            if orderBy:
+                for order_field in orderBy:
+                    if ":" in order_field:
+                        field, direction = order_field.split(":")
+                        if hasattr(self.model, field):
+                            col = getattr(self.model, field)
+                            if direction.lower() == "desc":
+                                query = query.order_by(col.desc())
+                            else:
+                                query = query.order_by(col.asc())
+                    else:
+                        if hasattr(self.model, order_field):
+                            query = query.order_by(getattr(self.model, order_field))
+
+            # Get total count for the query
+            total_count = query.count()
+
+            # Handle cursor-based pagination
+            if after:
+                after_id = self._decode_cursor(after)
+                query = query.filter(self.model.id > after_id)
+
+            if before:
+                before_id = self._decode_cursor(before)
+                query = query.filter(self.model.id < before_id)
+
+            # Apply limits
+            if first:
+                query = query.limit(first + 1)  # +1 to check if there's a next page
+            elif last:
+                # For last, we need to reverse the query
+                query = query.order_by(self.model.id.desc()).limit(last + 1)
+
+            items = query.all()
+
+            # Determine if there are more pages
+            has_next_page = False
+            has_previous_page = False
+
+            if first and len(items) > first:
+                has_next_page = True
+                items = items[:first]
+
+            if last and len(items) > last:
+                has_previous_page = True
+                items = items[:last]
+                items = list(reversed(items))  # Reverse back to correct order
+
+            # Build edges
+            edges = []
+            for item in items:
+                edges.append({
+                    "node": self._model_to_dict(item),
+                    "cursor": self._encode_cursor(item.id)
+                })
+
+            # Build page info
+            page_info = {
+                "hasNextPage": has_next_page,
+                "hasPreviousPage": has_previous_page,
+                "startCursor": edges[0]["cursor"] if edges else None,
+                "endCursor": edges[-1]["cursor"] if edges else None,
+            }
+
+            return {
+                "edges": edges,
+                "pageInfo": page_info,
+                "totalCount": total_count,
+            }
+
     def _setup_mutation_resolvers(self) -> None:
         """Setup mutation resolvers for create, update, and delete operations."""
         resource_name = self.resource_name
@@ -169,6 +347,10 @@ class GraphQLCRUDRouter:
         @self.mutation.field(f"create{resource_name}")
         def resolve_create(obj: Any, info: Any, input: dict[str, Any]) -> dict[str, Any]:
             """Create a new record."""
+            # Check permission
+            user = info.context.get("user")
+            self._check_permission("create", user)
+
             db: Session = info.context["db"]
 
             # Validate with Pydantic
@@ -190,6 +372,10 @@ class GraphQLCRUDRouter:
                 obj: Any, info: Any, id: int, input: dict[str, Any]
             ) -> dict[str, Any] | None:
                 """Update an existing record."""
+                # Check permission
+                user = info.context.get("user")
+                self._check_permission("update", user)
+
                 db: Session = info.context["db"]
 
                 # Get existing record
@@ -214,6 +400,10 @@ class GraphQLCRUDRouter:
         @self.mutation.field(f"delete{resource_name}")
         def resolve_delete(obj: Any, info: Any, id: int) -> bool:
             """Delete a record."""
+            # Check permission
+            user = info.context.get("user")
+            self._check_permission("delete", user)
+
             db: Session = info.context["db"]
 
             db_obj = db.query(self.model).filter(self.model.id == id).first()
@@ -333,8 +523,73 @@ class GraphQLCRUDRouter:
         return query
 
     def _model_to_dict(self, model_instance: Any) -> dict[str, Any]:
-        """Convert SQLAlchemy model instance to dictionary."""
-        return {
+        """
+        Convert SQLAlchemy model instance to dictionary.
+
+        If associations are enabled, includes related objects as nested dictionaries.
+        """
+        result = {
             c.name: getattr(model_instance, c.name)
             for c in model_instance.__table__.columns
         }
+
+        # Include associations if enabled
+        if self.enable_associations and self._associations_module_available:
+            from .associations import get_model_associations
+
+            associations = get_model_associations(type(model_instance))
+
+            for assoc_name, assoc_info in associations.items():
+                # Check if the association is loaded (to avoid lazy loading issues)
+                if hasattr(model_instance, assoc_name):
+                    related_obj = getattr(model_instance, assoc_name)
+
+                    if related_obj is not None:
+                        if assoc_info.uselist:
+                            # One-to-many or many-to-many: return list of dicts
+                            result[assoc_name] = [
+                                self._model_to_dict(item) for item in related_obj
+                            ]
+                        else:
+                            # One-to-one or many-to-one: return single dict
+                            result[assoc_name] = self._model_to_dict(related_obj)
+                    else:
+                        result[assoc_name] = None if not assoc_info.uselist else []
+
+        return result
+
+    def _encode_cursor(self, id_value: int) -> str:
+        """
+        Encode an ID into a cursor string (base64).
+
+        Args:
+            id_value: The ID value to encode
+
+        Returns:
+            Base64-encoded cursor string
+        """
+        import base64
+        cursor_str = f"cursor:{id_value}"
+        return base64.b64encode(cursor_str.encode()).decode()
+
+    def _decode_cursor(self, cursor: str) -> int:
+        """
+        Decode a cursor string back into an ID.
+
+        Args:
+            cursor: Base64-encoded cursor string
+
+        Returns:
+            The decoded ID value
+
+        Raises:
+            ValueError: If cursor is invalid
+        """
+        import base64
+        try:
+            decoded = base64.b64decode(cursor.encode()).decode()
+            if decoded.startswith("cursor:"):
+                return int(decoded.split(":", 1)[1])
+            raise ValueError("Invalid cursor format")
+        except Exception as e:
+            raise ValueError(f"Invalid cursor: {e}") from e
