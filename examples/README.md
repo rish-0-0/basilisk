@@ -4,14 +4,14 @@ This directory contains examples demonstrating how to use Basilisk to quickly cr
 
 ## 📚 Available Examples
 
-### 1. Basic Usage ([basic_usage.py](basic_usage.py))
+### 1. Basic Usage - REST API ([basic_usage.py](basic_usage.py))
 
-The simplest possible example - create a full CRUD API for a User model with just a few lines of code.
+The simplest possible example - create a full REST CRUD API for a User model with just a few lines of code.
 
 **What it demonstrates:**
 - Setting up a SQLAlchemy model
 - Creating Pydantic schemas
-- Generating CRUD routes with `CRUDRouter`
+- Generating REST CRUD routes with `CRUDRouter`
 - Accessing the auto-generated documentation endpoint
 
 **Run it:**
@@ -23,6 +23,60 @@ python examples/basic_usage.py
 - Interactive Swagger docs: http://localhost:8000/docs
 - API documentation: http://localhost:8000/users/documentation
 - List users: http://localhost:8000/users/
+
+---
+
+### 2. GraphQL Usage ([graphql_usage.py](graphql_usage.py))
+
+Create a full GraphQL API with queries and mutations using `GraphQLCRUDRouter`.
+
+**What it demonstrates:**
+- Auto-generating GraphQL schema from Pydantic models
+- GraphQL queries (list, get single item)
+- GraphQL mutations (create, update, delete)
+- Interactive GraphQL Playground
+- Advanced query parameters (orderBy, skip, limit)
+
+**Run it:**
+```bash
+python examples/graphql_usage.py
+```
+
+**Try it out:**
+- GraphQL Playground: http://localhost:8000/graphql/
+- View schema: http://localhost:8000/schema
+
+**Example queries:**
+```graphql
+# List all users
+query {
+  users {
+    id
+    name
+    email
+  }
+}
+
+# Create a user
+mutation {
+  createUser(input: {
+    name: "Alice"
+    email: "alice@example.com"
+    age: 25
+  }) {
+    id
+    name
+  }
+}
+
+# Update a user
+mutation {
+  updateUser(id: 1, input: { name: "Alice Johnson" }) {
+    id
+    name
+  }
+}
+```
 
 ---
 
@@ -47,13 +101,56 @@ python examples/basic_usage.py
 ## 🎯 What You'll Learn
 
 ### From `basic_usage.py`:
-- How to create a minimal CRUD API in ~170 lines
+- How to create a minimal REST CRUD API in ~170 lines
 - Auto-generated routes:
   - `GET /users/` - List all users with pagination
   - `GET /users/documentation` - Comprehensive API documentation
 - How Basilisk integrates with FastAPI's automatic OpenAPI docs
 - Database setup with SQLite
 - Pydantic schema creation with field validation
+
+### From `graphql_usage.py`:
+- Auto-generating GraphQL schemas from Pydantic models
+- GraphQL queries with filtering and pagination
+- GraphQL mutations (create, update, delete)
+- Using Ariadne for GraphQL integration
+- Interactive GraphQL Playground
+
+---
+
+## 🔄 Using Both REST and GraphQL Together
+
+You can easily use both REST and GraphQL in the same application:
+
+```python
+from basilisk import CRUDRouter, GraphQLCRUDRouter
+
+# REST API
+rest_router = CRUDRouter(
+    model=User,
+    create_schema=UserCreate,
+    response_schema=UserResponse,
+    get_db=get_db,
+    prefix="/api/users",
+)
+app.include_router(rest_router.router)
+
+# GraphQL API
+graphql_router = GraphQLCRUDRouter(
+    model=User,
+    create_schema=UserCreate,
+    update_schema=UserUpdate,
+    response_schema=UserResponse,
+    get_db=get_db,
+)
+app.mount("/graphql", graphql_router.app)
+```
+
+This gives you:
+- REST endpoints at `/api/users/`
+- GraphQL endpoint at `/graphql/`
+- REST Swagger docs at `/docs`
+- GraphQL Playground at `/graphql/`
 
 ---
 
@@ -108,12 +205,12 @@ curl http://localhost:8000/health
 ## 🔮 Coming Soon
 
 More examples will be added demonstrating:
-- Advanced query filtering
+- Advanced query filtering (GitHub-style query syntax)
 - Custom endpoints alongside CRUD routes
-- GraphQL integration with Ariadne
 - Multiple models with relationships
 - Authentication and authorization
 - Async database operations
+- Using both REST and GraphQL together in one app
 
 ---
 

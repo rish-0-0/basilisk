@@ -34,4 +34,51 @@ dev = [
     "pytest>=7.0.0",
     "httpx>=0.24.0",
     "uvicorn>=0.24.0",
+    "ariadne>=0.23.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
 ]
+graphql = [
+    "ariadne>=0.23.0",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py39"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # line too long (handled by formatter)
+    "B008",  # function call in argument defaults (FastAPI pattern)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]  # Allow unused imports in __init__.py
+
+[tool.mypy]
+python_version = "3.10"  # Use 3.10 for | union syntax
+warn_return_any = false
+warn_unused_configs = true
+disallow_untyped_defs = false  # Allow untyped defs for now
+check_untyped_defs = false  # Less strict for initial development
+warn_redundant_casts = true
+warn_unused_ignores = false
+no_implicit_optional = true
+strict_optional = false  # Less strict for development
+
+[[tool.mypy.overrides]]
+module = "ariadne.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "graphql.*"
+ignore_missing_imports = true
