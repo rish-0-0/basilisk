@@ -44,6 +44,13 @@ try:
 except ImportError:
     ASSOCIATIONS_AVAILABLE = False
 
+# MCP (Model Context Protocol) support - optional
+try:
+    from .mcp_router import MCPRouter
+    MCP_AVAILABLE = True
+except ImportError:
+    MCP_AVAILABLE = False
+
 # Build __all__ dynamically based on available features
 __all__ = ["CRUDRouter", "QueryParser"]
 
@@ -74,6 +81,11 @@ if ASSOCIATIONS_AVAILABLE:
         "has_association",
         "parse_include_param",
         "validate_include_param",
+    ])
+
+if MCP_AVAILABLE:
+    __all__.extend([
+        "MCPRouter",
     ])
 
 __version__ = "0.3.0"

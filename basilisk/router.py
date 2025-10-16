@@ -32,6 +32,13 @@ except ImportError:
     parse_include_param = None  # type: ignore
     validate_include_param = None  # type: ignore
 
+try:
+    from .mcp_router import MCPRouter
+    MCP_AVAILABLE = True
+except ImportError:
+    MCP_AVAILABLE = False
+    MCPRouter = None  # type: ignore
+
 
 class CRUDRouter:
     """
@@ -64,6 +71,7 @@ class CRUDRouter:
         permissions: Optional[Any] = None,  # PermissionConfig type
         get_current_user: Optional[Callable] = None,
         enable_associations: bool = False,
+        enable_mcp: bool = False,
     ):
         """
         Initialize the CRUD router.
@@ -79,6 +87,7 @@ class CRUDRouter:
             permissions: Optional PermissionConfig for RBAC
             get_current_user: Optional dependency for getting current user
             enable_associations: Enable relationship/association support (opt-in)
+            enable_mcp: Enable MCP (Model Context Protocol) routes for AI agents (opt-in)
         """
         self.model = model
         self.create_schema = create_schema
@@ -97,6 +106,9 @@ class CRUDRouter:
         # Setup associations if enabled
         self.enable_associations = enable_associations and ASSOCIATIONS_AVAILABLE
 
+        # Setup MCP mode if enabled
+        self.enable_mcp = enable_mcp and MCP_AVAILABLE
+
         # Create the FastAPI router
         self.router = APIRouter(prefix=prefix, tags=tags or [model.__name__])  # type: ignore[arg-type]
 
@@ -107,6 +119,10 @@ class CRUDRouter:
         self._add_update_route(self.update_schema, self.response_schema, self.model, self.get_db)
         self._add_delete_route(self.model, self.get_db)
         self._add_documentation_route()
+
+        # Add MCP routes if enabled
+        if self.enable_mcp:
+            self._add_mcp_routes(prefix)
 
     def _add_list_route(self, response_schema: type[BaseModel], model: type[Any], get_db: Callable) -> None:
         """Add GET / route for listing records with advanced query support."""
@@ -549,3 +565,18 @@ class CRUDRouter:
                     "columns": columns_info
                 }
             }
+
+    def _add_mcp_routes(self, prefix: str) -> None:
+        """Add MCP (Model Context Protocol) routes for AI agent integration."""
+        if MCP_AVAILABLE and MCPRouter:
+            mcp_router = MCPRouter(
+                model=self.model,
+                create_schema=self.create_schema,
+                update_schema=self.update_schema,
+                response_schema=self.response_schema,
+                prefix=prefix,
+                enable_associations=self.enable_associations,
+                enable_permissions=self.permission_checker is not None,
+            )
+            # Include the MCP router into the main router
+            self.router.include_router(mcp_router.router)

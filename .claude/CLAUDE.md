@@ -370,6 +370,123 @@ graphql_router = GraphQLCRUDRouter(
 - `examples/associations_example.py` - Comprehensive example with all relationship types
 - `tests/test_associations.py` - Full test suite for associations
 
+### ✅ Phase 7: MCP Mode for AI Agents (COMPLETED)
+**Priority**: OPTIONAL
+
+Implemented MCP (Model Context Protocol) mode as an **OPT-IN** feature that exposes specialized routes for AI agents to understand and interact with the API.
+
+**Note**: MCP mode is completely optional and designed specifically for AI agent integration.
+
+#### Implemented Features:
+1. **MCP Overview Endpoint** (`/.mcp/overview`):
+   - Complete API overview in single response
+   - Model structure and capabilities
+   - Available endpoints with descriptions
+   - Schema information
+   - Feature flags (associations, permissions, etc.)
+   - Links to other MCP endpoints
+
+2. **MCP Schema Endpoint** (`/.mcp/schema`):
+   - Detailed Pydantic schema information
+   - Database model structure with column details
+   - Field types, validation rules, and constraints
+   - Relationship information (if enabled)
+
+3. **MCP Examples Endpoint** (`/.mcp/examples`):
+   - Comprehensive usage examples for each operation
+   - Request/response patterns
+   - Query parameter examples
+   - Filter, ordering, selection examples
+   - Association usage examples (if enabled)
+
+4. **MCP Capabilities Endpoint** (`/.mcp/capabilities`):
+   - List of all supported operations (CRUD)
+   - Query features (filtering, ordering, aggregation, etc.)
+   - Security features
+   - Authentication requirements
+   - Association support status
+
+5. **MCP Guide Endpoint** (`/.mcp/guide`):
+   - Best practices for AI agents
+   - Common usage patterns
+   - Error handling guidance
+   - Quick reference guide
+   - Security considerations
+
+#### Use Cases:
+- **AI Agent Integration**: AI agents can read MCP endpoints to understand the API
+- **Automated Testing**: Bots can discover capabilities and generate tests
+- **API Discovery**: Automated tools can explore API structure
+- **Documentation Generation**: Auto-generate client docs from MCP data
+- **SDK Generation**: Create SDKs based on MCP schemas
+
+#### Implementation Notes:
+- ✅ **OPT-IN Design**: MCP mode is completely optional via `enable_mcp=True`
+- ✅ **No Authentication Required**: MCP endpoints are public (documentation only)
+- ✅ **Separate Router**: Uses dedicated `MCPRouter` class
+- ✅ **Nested Under /.mcp/**: All MCP routes are under `/.mcp/` prefix
+- ✅ **Context-Aware**: Reflects actual API configuration (associations, permissions, etc.)
+- ✅ **Machine-Readable**: JSON format optimized for AI consumption
+- ✅ **Comprehensive**: Includes schemas, examples, capabilities, and guides
+
+#### Usage:
+```python
+# REST API with MCP mode
+router = CRUDRouter(
+    model=Product,
+    create_schema=ProductCreate,
+    response_schema=ProductResponse,
+    get_db=get_db,
+    enable_mcp=True,  # OPT-IN: Enable MCP mode
+)
+
+# MCP Endpoints automatically available:
+# GET /products/.mcp/overview     - Complete API overview
+# GET /products/.mcp/schema       - Detailed schema info
+# GET /products/.mcp/examples     - Usage examples
+# GET /products/.mcp/capabilities - API capabilities
+# GET /products/.mcp/guide        - Best practices guide
+```
+
+#### Example Response Structure:
+```json
+{
+  "resource": "Product",
+  "model": {
+    "name": "Product",
+    "table_name": "products",
+    "columns": { ... },
+    "associations": { ... }
+  },
+  "schemas": {
+    "create": { ... },
+    "update": { ... },
+    "response": { ... }
+  },
+  "endpoints": {
+    "list": { "method": "GET", "path": "/", "supports": [...] },
+    "get": { "method": "GET", "path": "/{id}", ... },
+    ...
+  },
+  "features": {
+    "associations": true,
+    "permissions": false,
+    "advanced_querying": true,
+    "pagination": true
+  }
+}
+```
+
+#### Files Created:
+- `basilisk/mcp_router.py` - MCP router module (optional)
+- `examples/mcp_mode_example.py` - Comprehensive MCP mode example
+
+#### What's Not Implemented (Future):
+- ❌ MCP mode for GraphQL (currently REST only)
+- ❌ Custom MCP endpoint configuration
+- ❌ MCP versioning
+- ❌ OpenAPI/Swagger integration with MCP
+
 ---
 
 ## 🎯 Current Implementation Status
@@ -421,14 +538,20 @@ graphql_router = GraphQLCRUDRouter(
    - REST documentation endpoint
    - Interactive Swagger UI
    - GraphQL Playground
-9. ✅ **Core Features**:
+9. ✅ **MCP Mode (Model Context Protocol)** - Optional:
+   - AI agent integration endpoints
+   - Comprehensive API documentation for machines
+   - Usage examples and capabilities
+   - Best practices guides
+   - Schema introspection
+10. ✅ **Core Features**:
    - Pydantic model integration
    - SQLAlchemy 2.0 support
    - FastAPI integration
    - Proper error handling
    - Security features (SQL injection prevention, input validation)
    - Optional dependencies (Ariadne for GraphQL)
-   - Optional features (RBAC, Associations)
+   - Optional features (RBAC, Associations, MCP Mode)
 
 ### What's NOT Implemented Yet:
 1. ❌ **Future Enhancements**:
@@ -694,4 +817,4 @@ tests/
 
 **Last Updated**: 2025-10-16
 **Current Version**: 0.3.0
-**Status**: Active Development - Phases 1-6 Complete (REST, GraphQL, Query Parsing, RBAC, Associations)
+**Status**: Active Development - Phases 1-7 Complete (REST, GraphQL, Query Parsing, GraphQL Enhancements, RBAC, Associations, MCP Mode)
